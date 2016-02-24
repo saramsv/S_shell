@@ -9,7 +9,11 @@ string location="root@sara / $ ";
 int file_system_size = 100*1024*1024;
 int inode_max_number_of_files = 1024;
 int n_inodes = 0;
-int block_siz = 2048;
+short inode_table_row_size = 8; //2B for inode_number, 4 for offset and 1 for type
+short directory_table_row_size = 258;//256B for file names and 2B for inode numbers which are short int
+int block_size = 32*1024;
+int header_size= 260; //256B for file names and 4B for address
+short current_inode = 0;
 
 FILE* f_open(int truncate=0)
 {
@@ -25,30 +29,111 @@ FILE* f_open(int truncate=0)
     return fp;
 }
 
+short create_a_new_inode_number()
+{
+    return n_inodes+1;
+}
+
+
 void add_to_inode_table(short inode_number, int offset, char type)
 {
     
     FILE * fp = f_open();
-   // fp.open("my_filesys.bin", ios::in| ios::out | ios::binary | ios::ate);
-//    fp.seekp(n_inodes*8 , ios::beg);
-    fseek(fp, n_inodes * 8 , SEEK_SET);
+    fseek(fp, n_inodes * inode_table_row_size , SEEK_SET);
     fwrite((char *)&inode_number, sizeof(short), 1, fp);
     fwrite((char *)&offset, sizeof(int), 1, fp);
     fwrite((char *)&type, sizeof(char), 1, fp);
-    // fp.write((char *) &offset, sizeof(offset));
-    // fp.write((char *) &type, sizeof(type));
     n_inodes += 1;
     fclose(fp);
 }
 
-void make_a_header(string filename, short inode_number)
+void make_a_header(int next_add, string filename)
 {
     FILE * fp = f_open();
-    fseek(fp, inode_max_number_of_files * 8, SEEK_SET);
+    fseek(fp, inode_max_number_of_files * inode_table_row_size, SEEK_SET);
+    fwrite(&next_add, sizeof(int), 1, fp);
     fwrite(filename.c_str(), sizeof(char), sizeof(filename), fp);
-    fwrite(&inode_number, sizeof(inode_number), 1, fp);
-    cout << "sara!!";
     fclose(fp);
+}
+
+void add_in_directory_table(string name , short inode_number, short ith_element)
+{
+    FILE * fp = f_open();
+    fseek(fp, inode_table_row_size * inode_max_number_of_files + header_size +(ith_element-1)*directory_table_row_size, SEEK_SET);
+    fwrite(name.c_str(), sizeof(char), 255, fp); //sizeof(name), fp);
+    fwrite(&inode_number, sizeof(short),1 ,fp);
+    fclose(fp);
+}
+
+int request_a_inode(short inode_id)
+{
+    FILE * fp = f_open();
+    int inode_table_size = inode_max_number_of_files *inode_table_row_size;
+    int address = 0;
+    short inode_number = 0;
+    fseek(fp ,address , SEEK_SET);
+    fread(&inode_number, 2, 1, fp);
+    if(inode_number == inode_id)
+    {
+        fread(&address, 4 , 1, fp);
+    }
+    else
+    {
+        while(inode_number != inode_id && address<inode_table_size)
+        {
+            address += inode_table_row_size-2;
+            fseek(fp , address,SEEK_CUR);
+            fread(&inode_number, 2, 1, fp);
+        }
+        fread(&address, 4, 1, fp);
+
+    }
+    cout<<"first address:"<<address<<"\n";
+    //fread(&address, 4 , 1, fp);
+    fseek(fp , address + header_size+255, SEEK_CUR);
+    fread(&inode_number,2 ,1 ,fp);
+    while (inode_number!=0)
+    {
+        
+        cout<<"second address:"<<address;
+        address += 255;
+        fseek(fp , address, SEEK_CUR);
+        fread(&inode_number,2 ,1 ,fp);
+    }
+    fclose(fp);
+    return address-255;
+
+}
+
+int request_a_block()
+{
+    FILE * fp = f_open();
+    int address = inode_max_number_of_files * inode_table_row_size + 4; // 4 is for the "next  address" in the header.
+    //how to read an int
+    /*fseek(fp, address - 4, SEEK_SET);
+    int test;
+    fread(&test, sizeof(int), 1, fp);
+    cout<<"Test: "<<test<<endl;*/
+
+    fseek(fp, address, SEEK_SET);
+    bool is_block_empty = false;
+    char buffer[255];
+    while(is_block_empty==false)
+    {
+        fread(buffer, 255, 1, fp);
+        if(buffer[0]==0)
+        {
+            is_block_empty = true;
+            address -=4;
+        }
+        else
+        {
+            address= address+block_size;
+            fseek(fp,address,SEEK_CUR);
+        }
+    }
+    fclose(fp);
+    return address;
 }
 
 void mkfs()
@@ -64,18 +149,25 @@ void mkfs()
     fseek(fp, file_system_size-1, SEEK_SET);
     char c = '0';
     fwrite(&c, sizeof(char), 1, fp);
-    short inode_number = 1;
+
+    int next_block_address = 0;
+    string current_directory_name = "sara";
+    string parent_directory_name = "Moa";
+    short parent_inode = create_a_new_inode_number();
+    current_inode = parent_inode;
+
+    add_in_directory_table(current_directory_name, current_inode, 1);
+    add_in_directory_table(parent_directory_name, parent_inode, 2);
+    make_a_header(next_block_address, current_directory_name);
+    add_to_inode_table(current_directory_name, inode_table_row_size * inode_max_number_of_files, 'd');
+    
     fclose(fp);
-
-
-    make_a_header("/", inode_number);
-    add_to_inode_table(1,8*inode_max_number_of_files,'d');
-    cout << "My File System!" << "\n";
-    cout << location;
 }
 
 void display()
 {  
+    cout << "My File System!" << "\n";
+    cout << location;
     string more_command = "";
     string last_command = "exit";
     bool is_more_command = true;
@@ -101,6 +193,7 @@ int main()
 {
     mkfs();
     display();
+    //cout<<request_a_block()<<"\n";
+    cout<<request_a_inode(1)<<"\n";
     return 0;
 }
-
