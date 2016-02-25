@@ -161,24 +161,22 @@ void make_a_header(int next_add, string filename)
 }
 void mkfs()
 {
-    /*ofstream fp;
-    fp.open("my_filesys.bin", ios::out |ios::in| ios::binary | ios::ate); 
-    fp.seekp(file_system_size - 1, ios::beg);
-    fp<<'0';
-    fp.close();
-    make_a_header("/",1);*/
+    FILE *fp = f_open(1);
+    char c = 0;
+    fseek(fp, file_system_size - 1, SEEK_SET);
+    fwrite(&c, sizeof(char), 1, fp);
+    fclose(fp);
 
-    FILE *fp = fopen("/home/sara/s_shell/my_filesys.bin", "w");
-    int i=1;
-    while(i<file_system_size)
+    /*int i = 0;
+    while(i < file_system_size)
     {
         //fseek(fp, 1, SEEK_CUR);
-        char c = '0';
+        char c = 0;
         fwrite(&c, sizeof(char), 1, fp);
         i++;
-    }
+    }*/
 
-/*    int next_block_address = 0;
+    int next_block_address = 0;
     string current_directory_name = "/";
     string parent_directory_name = "..";
     short parent_inode = create_a_new_inode_number();
@@ -191,9 +189,7 @@ void mkfs()
     add_in_directory_table(current_directory_name, current_inode, current_inode);
     cout<<"after directory table"<<endl;
     add_in_directory_table(parent_directory_name, parent_inode, current_inode);
-    cout<<"after dir2 table"<<endl;*/
-    
-    fclose(fp);
+    cout<<"after dir2 table"<<endl;
 }
 
 void display()
