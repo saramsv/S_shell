@@ -62,7 +62,7 @@ int find_offset(short inode_id)
     int address = 0;
     short inode_number = 0;
     fseek(fp ,address , SEEK_SET);
-    fread(&inode_number, 2, 1, fp);
+    fread(&inode_number, sizeof(short), 1, fp);
     //cout <<"found inode number is: "<<inode_number;
     if(inode_number == inode_id)
     {
@@ -76,10 +76,14 @@ int find_offset(short inode_id)
             address += inode_table_row_size;
             fseek(fp , address,SEEK_SET);
             fread(&inode_number, sizeof(short), 1, fp);
+            if(inode_number == inode_id)
+            {
+                fread(&address, sizeof(int), 1, fp);
+                return address;
+            }
         }
-        fread(&address, sizeof(int), 1, fp);
-        return address;
     }
+    fclose(fp);
     return 0;
 
 }
@@ -93,30 +97,27 @@ int request_a_block()
     bool is_block_empty = false;
     char buffer[256];
     fread(buffer, 256, 1, fp);
-    cout<<"buffer[0]: "<<buffer[0]<<buffer[1]<<buffer[2]<<buffer[3]<<endl;
     if(buffer[0]==0)
     {
-        cout<< "raft to if"<<endl;
         is_block_empty = true;
-        address -=4;
+        fclose(fp);
+        return address-4;
     }
     else
     {
         while(is_block_empty==false)
         {
-            address= address+block_size;
+            address= address+block_size + 4; // for the first byte which contains "next address"
             fseek(fp,address,SEEK_SET);
             fread(buffer, 256, 1, fp);
             if(buffer[0]==0)
             {
                 is_block_empty = true;
-                address -=4;
+                fclose(fp);
+                return address-4;
             }
         }
     }
-    fclose(fp);
-    cout <<"request a block is: "<< address <<endl;
-    return address;
 }
 
 void make_a_header(int next_add, string filename, int addr)
@@ -142,6 +143,7 @@ int request_a_inode()
     if(address == 0)
     {
         cout<<"There is no such directory"<<endl;
+        fclose(fp);
         return 0;
     }
     max_addr = address + block_size;
@@ -155,7 +157,8 @@ int request_a_inode()
     cout<<" donbale node khali "<<endl;
     if (inode_number==0)
     {
-        cout <<"hamoon ali khalie ba addr:"<< address-256<<endl;
+        cout <<"hamoon ali khalie ba addr:"<< address-256-258<<endl;
+        fclose(fp);
         return address- 256-258;
     }
     else
@@ -168,6 +171,7 @@ int request_a_inode()
             address += 258;
             if(inode_number == 0)
             {
+                fclose(fp);
                 return address-256-258;
             }
             else if(inode_number!=0 && address >= max_addr && next_addr == 0)
@@ -180,6 +184,7 @@ int request_a_inode()
                 string str(name);
                 make_a_header(next_addr, str, address);
                 address += header_size;
+                fclose(fp);
                 return address;
             }
             else if(inode_number!=0 && address >= max_addr && next_addr != 0)
@@ -191,6 +196,7 @@ int request_a_inode()
                 fread(&inode_number, sizeof(short),1, fp);
                 if(inode_number == 0)
                 {
+                    fclose(fp);
                     return address + header_size;
                 }
                 max_addr = address + block_size;
@@ -200,18 +206,18 @@ int request_a_inode()
         }
     }
     fclose(fp);
-    return address - 256;
+    //return address - 256;
 }
 
 void add_in_directory_table(string name , short inode_number)
 {
     FILE * fp = f_open();
     int addr = request_a_inode(); // for the parent directory
+    cout<<"khoroji request inode baraye "<<name<<" ine: "<< addr<<endl;
     fseek(fp, addr, SEEK_SET);
     fwrite(name.c_str(), sizeof(char), sizeof(name), fp); 
-    fseek(fp, 256, SEEK_CUR);
+    fseek(fp, addr+256, SEEK_SET);
     fwrite(&inode_number, sizeof(short),1 ,fp); //adding a new inode_number
-    cout <<"added in dir table " <<endl;
     fclose(fp);
 }
 
@@ -250,7 +256,7 @@ int find_the_directory_table(short inode_id)
     fread(&inode_number, 2, 1, fp);
     if(inode_number == inode_id)
     {
-        fread(&address, 4 , 1, fp);
+        fread(&address, sizeof(int) , 1, fp);
     }
     else
     {
@@ -258,9 +264,9 @@ int find_the_directory_table(short inode_id)
         {
             address += inode_table_row_size;
             fseek(fp , address,SEEK_SET);
-            fread(&inode_number, 2, 1, fp);
+            fread(&inode_number, sizeof(short), 1, fp);
         }
-        fread(&address, 4, 1, fp);
+        fread(&address, sizeof(int), 1, fp);
     }
     cout <<"braye in file bayad toye in addr begarde: "<< address <<endl;
     fclose(fp);
@@ -274,7 +280,7 @@ void find_the_file(int &addr , short &inode_id, string filename)
     fseek(fp, address , SEEK_SET);
     bool exist = false;
     char name[256];
-    fread(&addr, 4, 1, fp);
+    fread(&addr, sizeof(int), 1, fp);
     int max_addr = address + block_size;
     fseek(fp, addr + address + header_size , SEEK_SET);
     while(!exist && address < max_addr)
@@ -284,33 +290,34 @@ void find_the_file(int &addr , short &inode_id, string filename)
         if(str.compare(filename)==0)
         {
             exist = true;
-            fread(&inode_id , 2, 1, fp);
+            fread(&inode_id , sizeof(short), 1, fp);
            // return 0;        
         }
         address += directory_table_row_size;
 
     }
-   // return 0;
+   fclose(fp);
 }
 
 short finding_file(string filename)
 {
     int next_addr = 0;
     short inode_number = 0;
-    int dir_table_addr = find_the_directory_table(current_inode);
+    int dir_table_addr = find_offset(current_inode);
     char name[256];
     int max_addr = dir_table_addr + block_size;
     FILE * fp = f_open();
     fseek(fp, dir_table_addr , SEEK_SET);
-    fread(&next_addr, 4, 1, fp);
+    fread(&next_addr, sizeof(int), 1, fp);
     fseek(fp, 256 , SEEK_CUR);
     fread(name, 256, 1, fp);
     string str(name);
-    cout<<"name= "<<str<<endl;
-    cout<<"NA= "<<next_addr<<endl;
+    //cout<<"name= "<<str<<endl;
+    //cout<<"NA= "<<next_addr<<endl;
     if (str.compare(filename)==0)
     {
-        fread(&inode_number , 2, 1, fp);
+        fread(&inode_number , sizeof(short), 1, fp);
+        fclose(fp);
         return inode_number;        
     }
     else
@@ -321,13 +328,14 @@ short finding_file(string filename)
             while(!exist && dir_table_addr<max_addr)
             {
                 //cout<<"raft to while"<<endl;
-                fseek(fp, 2 , SEEK_CUR);
+                fseek(fp, sizeof(short) , SEEK_CUR);
                 fread(name, 256, 1, fp);
                 string str(name);
                 if(str.compare(filename)==0)
                 {
                     exist = true;
-                    fread(&inode_number , 2, 1, fp);
+                    fread(&inode_number , sizeof(short), 1, fp);
+                    fclose(fp);
                     return inode_number;        
 
                 }
@@ -347,7 +355,7 @@ short finding_file(string filename)
            }
         }
     }
-    cout <<"inode hasel az search baraye file: "<< filename <<"ine: " <<inode_number<<endl;
+    cout <<"inode hasel az search baraye file: "<< filename <<" ine: " <<inode_number<<endl;
     return inode_number;
 }
 
@@ -359,8 +367,8 @@ void open(string filename , char flag)
     {
         short inode_number = create_a_new_inode_number();
         cout<<"inode numbere jadid: "<< inode_number<<endl;
-        add_to_inode_table(inode_number, request_a_block(), 'f');
         int addr = request_a_block();
+        add_to_inode_table(inode_number, addr, 'f');
         make_a_header(0, filename, addr);
         add_in_directory_table(filename ,inode_number);
         cout <<"SUCCESS fd = "<<fd<<endl;
@@ -374,18 +382,18 @@ void open(string filename , char flag)
 void LS()
 {
     FILE * fp = f_open();
-    int addr = find_the_directory_table(current_inode);
+    //int addr = find_the_directory_table(current_inode);
+    int addr = find_offset(current_inode);
     char name[256];
     fseek(fp, addr, SEEK_SET);
     int next_addr = 0;
     int max_addr = addr + block_size;
     short inode_number = 0;
     fread(&next_addr , sizeof(int), 1, fp);
-    cout<<"in addr jadide"<<next_addr<<endl;
     fseek(fp,  header_size - sizeof(int), SEEK_CUR);
     fread(name, 256, 1, fp);
     fread(&inode_number , sizeof(short), 1, fp);
-    cout<<"i_number"<<inode_number<<endl;;
+    cout<<"inode_number: "<<inode_number<<endl;
     if(inode_number == 0)
     {
         return;
@@ -402,6 +410,7 @@ void LS()
                 cout<<name<<"    ";
             }
             addr += directory_table_row_size;
+            cout<<"NA: "<<next_addr<<"addr: "<<addr<<"max addr: "<<max_addr<<endl;
             if(addr >= max_addr && next_addr == 0)
             {
                 return;
@@ -424,6 +433,8 @@ void LS()
             }
         }
     }
+    cout<<endl;
+    fclose(fp);
 }
 
 void display()
@@ -473,12 +484,6 @@ void display()
 }
 int main()
 {
-    //mkfs();
     display();
-    //cout<<"next free block: "<<request_a_block()<<"\n";
-    //cout<<"next free node in Inode table: "<<request_a_inode(1)<<"\n";
-    //cout<<find_the_directory_table(1);
-    //open("test", 'r');
-    //open ("test2", 'w');
     return 0;
 }
