@@ -138,6 +138,7 @@ int request_a_inode()
     char name[256];
     short inode_number;
     address = find_offset(current_inode);
+    int addr = address; //I want to have it in the case that I need a new block so I can edit "next_addr" without finding it again.
     if(address == 0)
     {
         cout<<"There is no such directory"<<endl;
@@ -150,24 +151,32 @@ int request_a_inode()
     address += header_size + 256;
     fseek(fp , address , SEEK_SET);
     fread(&inode_number,sizeof(short) ,1 ,fp);
+    address += 258;
+    cout<<" donbale node khali "<<endl;
     if (inode_number==0)
     {
-        return address - 256;
+        cout <<"hamoon ali khalie ba addr:"<< address-256<<endl;
+        return address- 256-258;
     }
     else
     {
         while (inode_number!=0 && address < max_addr)
         {
-            address += 258;
-            fseek(fp , address, SEEK_SET);
+            cout<< "avali khali nabood omad toye while"<<endl;
+            fseek(fp , 256, SEEK_CUR);
             fread(&inode_number,sizeof(short) ,1 ,fp);
+            address += 258;
             if(inode_number == 0)
             {
-                return address - 256;
+                return address-256-258;
             }
             else if(inode_number!=0 && address >= max_addr && next_addr == 0)
             {
+                cout<<"baraye inode jadid ja nadash ye block dige gereft"<<endl;
                 address = request_a_block();
+                fseek(fp, addr , SEEK_SET);
+                fwrite(&address, sizeof(int), 1, fp);
+                cout<< address <<" ro nevesht toye "<<addr<<endl;
                 string str(name);
                 make_a_header(next_addr, str, address);
                 address += header_size;
@@ -178,9 +187,16 @@ int request_a_inode()
                 address = next_addr;
                 fseek(fp , address, SEEK_SET);
                 fread(&next_addr, sizeof(int), 1, fp);
+                fseek(fp, 2*256, SEEK_CUR);
+                fread(&inode_number, sizeof(short),1, fp);
+                if(inode_number == 0)
+                {
+                    return address + header_size;
+                }
                 max_addr = address + block_size;
-                address += header_size + 256;
+                address += header_size + directory_table_row_size;
             }
+
         }
     }
     fclose(fp);
@@ -193,11 +209,9 @@ void add_in_directory_table(string name , short inode_number)
     int addr = request_a_inode(); // for the parent directory
     fseek(fp, addr, SEEK_SET);
     fwrite(name.c_str(), sizeof(char), sizeof(name), fp); 
-    addr += 256;
-    fseek(fp, addr, SEEK_SET);
+    fseek(fp, 256, SEEK_CUR);
     fwrite(&inode_number, sizeof(short),1 ,fp); //adding a new inode_number
     cout <<"added in dir table " <<endl;
-
     fclose(fp);
 }
 
@@ -339,7 +353,7 @@ short finding_file(string filename)
 
 void open(string filename , char flag)
 {
-    int fd = finding_file(filename);
+    int fd = finding_file(filename);//addres of the beginning of the file
     cout<<"fd= "<<fd<<endl;
     if(fd == 0)
     {
@@ -349,11 +363,11 @@ void open(string filename , char flag)
         int addr = request_a_block();
         make_a_header(0, filename, addr);
         add_in_directory_table(filename ,inode_number);
-        cout <<"SUCCESS fd = "<<fd;
+        cout <<"SUCCESS fd = "<<fd<<endl;
     }
     else
     {
-        cout <<"SUCCESS fd = "<<fd;
+        cout <<"SUCCESS fd = "<<fd<<endl;
     }
 }
 
@@ -361,16 +375,17 @@ void LS()
 {
     FILE * fp = f_open();
     int addr = find_the_directory_table(current_inode);
-    cout<<addr <<endl;
     char name[256];
     fseek(fp, addr, SEEK_SET);
     int next_addr = 0;
     int max_addr = addr + block_size;
     short inode_number = 0;
     fread(&next_addr , sizeof(int), 1, fp);
+    cout<<"in addr jadide"<<next_addr<<endl;
     fseek(fp,  header_size - sizeof(int), SEEK_CUR);
     fread(name, 256, 1, fp);
     fread(&inode_number , sizeof(short), 1, fp);
+    cout<<"i_number"<<inode_number<<endl;;
     if(inode_number == 0)
     {
         return;
@@ -393,6 +408,7 @@ void LS()
             }
             else if(addr >= max_addr && next_addr != 0)
             {
+                cout<<"az block raft biroon"<<endl;
                 addr = next_addr;
                 max_addr = addr + block_size;
                 fseek(fp, addr, SEEK_SET);
