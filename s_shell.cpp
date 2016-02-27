@@ -119,8 +119,17 @@ int request_a_block()
     return address;
 }
 
+void make_a_header(int next_add, string filename, int addr)
+{
+    FILE * fp = f_open();
+    fseek(fp, addr, SEEK_SET);
+    fwrite(&next_add, sizeof(int), 1, fp);
+    fwrite(filename.c_str(), sizeof(char), sizeof(filename), fp);
+    cout <<"header  "<< filename<<" has been made in " <<addr<<endl;
+    fclose(fp);
+}
 
-int request_a_inode(short inode_id)
+int request_a_inode()
 {
     FILE * fp = f_open();
     int max_addr = 0;
@@ -128,7 +137,7 @@ int request_a_inode(short inode_id)
     int next_addr = 0;
     char name[256];
     short inode_number;
-    address = find_offset(inode_id);
+    address = find_offset(current_inode);
     if(address == 0)
     {
         cout<<"There is no such directory"<<endl;
@@ -141,34 +150,47 @@ int request_a_inode(short inode_id)
     address += header_size + 256;
     fseek(fp , address , SEEK_SET);
     fread(&inode_number,sizeof(short) ,1 ,fp);
-    while (inode_number!=0 && address < max_addr)
+    if (inode_number==0)
     {
-        address += 258;
-        fseek(fp , address, SEEK_SET);
-        fread(&inode_number,2 ,1 ,fp);
-        if(inode_number!=0 && address >= max_addr && next_addr == 0)
+        return address - 256;
+    }
+    else
+    {
+        while (inode_number!=0 && address < max_addr)
         {
-            address = request_a_block();
-            make_a_header(next_addr, string str(name), address);
-            address += header_size;
-            return address;
-        }
-        else if(inode_number!=0 && address >= max_addr && next_addr != 0)
-        {
-            address = next_addr;
-            fread(&next_addr, sizeof(int), 1, fp);
-            max_addr = address + block_size;
-            address += header_size + 256;
+            address += 258;
+            fseek(fp , address, SEEK_SET);
+            fread(&inode_number,sizeof(short) ,1 ,fp);
+            if(inode_number == 0)
+            {
+                return address - 256;
+            }
+            else if(inode_number!=0 && address >= max_addr && next_addr == 0)
+            {
+                address = request_a_block();
+                string str(name);
+                make_a_header(next_addr, str, address);
+                address += header_size;
+                return address;
+            }
+            else if(inode_number!=0 && address >= max_addr && next_addr != 0)
+            {
+                address = next_addr;
+                fseek(fp , address, SEEK_SET);
+                fread(&next_addr, sizeof(int), 1, fp);
+                max_addr = address + block_size;
+                address += header_size + 256;
+            }
         }
     }
     fclose(fp);
     return address - 256;
 }
 
-void add_in_directory_table(string name , short inode_number, short inode_id)
+void add_in_directory_table(string name , short inode_number)
 {
     FILE * fp = f_open();
-    int addr = request_a_inode(inode_id); // for the parent directory
+    int addr = request_a_inode(); // for the parent directory
     fseek(fp, addr, SEEK_SET);
     fwrite(name.c_str(), sizeof(char), sizeof(name), fp); 
     addr += 256;
@@ -179,15 +201,6 @@ void add_in_directory_table(string name , short inode_number, short inode_id)
     fclose(fp);
 }
 
-void make_a_header(int next_add, string filename, int addr)
-{
-    FILE * fp = f_open();
-    fseek(fp, addr, SEEK_SET);
-    fwrite(&next_add, sizeof(int), 1, fp);
-    fwrite(filename.c_str(), sizeof(char), sizeof(filename), fp);
-    cout <<"header  "<< filename<<" has been made in " <<next_add<<endl;
-    fclose(fp);
-}
 void mkfs()
 {
     FILE *fp = f_open(1);
@@ -202,13 +215,13 @@ void mkfs()
     short parent_inode = create_a_new_inode_number();
     current_inode = parent_inode;
 
-    add_to_inode_table(current_inode, inode_table_row_size * inode_max_number_of_files, 'd');
+    add_to_inode_table(current_inode, inode_table_row_size * inode_max_number_of_files, 'd'); // parameters are inode number, offset and type
    int addr = request_a_block();
     make_a_header(next_block_address, current_directory_name, addr);
    // cout<<"after header"<<endl;
-    add_in_directory_table(current_directory_name, current_inode, current_inode);
+    add_in_directory_table(current_directory_name, current_inode);
     //cout<<"after directory table"<<endl;
-    add_in_directory_table(parent_directory_name, parent_inode, current_inode);
+    add_in_directory_table(parent_directory_name, parent_inode);
     //cout<<"after dir2 table"<<endl;
 }
 
@@ -335,7 +348,7 @@ void open(string filename , char flag)
         add_to_inode_table(inode_number, request_a_block(), 'f');
         int addr = request_a_block();
         make_a_header(0, filename, addr);
-        add_in_directory_table(filename ,inode_number, current_inode);
+        add_in_directory_table(filename ,inode_number);
         cout <<"SUCCESS fd = "<<fd;
     }
     else
@@ -348,21 +361,51 @@ void LS()
 {
     FILE * fp = f_open();
     int addr = find_the_directory_table(current_inode);
+    cout<<addr <<endl;
     char name[256];
     fseek(fp, addr, SEEK_SET);
     int next_addr = 0;
     int max_addr = addr + block_size;
+    short inode_number = 0;
     fread(&next_addr , sizeof(int), 1, fp);
-    if(next_addr == 0)
+    fseek(fp,  header_size - sizeof(int), SEEK_CUR);
+    fread(name, 256, 1, fp);
+    fread(&inode_number , sizeof(short), 1, fp);
+    if(inode_number == 0)
     {
-        fseek(fp, header_size - sizeof(int), SEEK_CUR);
-        addr += header_size;
-        while(addr < max_addr)
+        return;
+    }
+    else
+    {
+        cout<<name<<"    ";
+        while(addr < max_addr && inode_number !=0)
         {
             fread(name , 256, 1, fp);
-            cout<<name<<"    ";
+            fread(&inode_number , sizeof(short), 1, fp);
+            if (inode_number != 0)
+            {
+                cout<<name<<"    ";
+            }
             addr += directory_table_row_size;
-            fseek(fp, sizeof(short) , SEEK_CUR);
+            if(addr >= max_addr && next_addr == 0)
+            {
+                return;
+            }
+            else if(addr >= max_addr && next_addr != 0)
+            {
+                addr = next_addr;
+                max_addr = addr + block_size;
+                fseek(fp, addr, SEEK_SET);
+                fread(&next_addr , sizeof(int), 1, fp);
+                fseek(fp,  header_size - sizeof(int), SEEK_CUR);
+                fread(name, 256, 1, fp);
+                fread(&inode_number , sizeof(short), 1, fp);
+                if (inode_number != 0)
+                {
+                    cout<<name<<"    ";
+                }
+                addr += directory_table_row_size;
+            }
         }
     }
 }
